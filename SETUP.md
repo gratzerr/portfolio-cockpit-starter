@@ -64,7 +64,7 @@ service cloud.firestore {
 
 1. Alle Dateien aus diesem `starter-kit/`-Ordner ins Repo:
    - Skripte + `template.html` → in einen Ordner `pipeline/`
-   - `.github/workflows/update.yml` → gleicher Pfad im Repo
+   - `workflow-vorlage/update.yml` → **erst nach Schritt 3** (Secrets gesetzt!) nach `.github/workflows/update.yml` verschieben — vorher würde der Workflow ins Leere laufen und Fehler-Mails schicken
    - `sw.js`, `robots.txt` → Repo-Wurzel
 2. `cockpit_config.template.json` → als `pipeline/cockpit_config.json` speichern und
    **alle** Platzhalter füllen (Firebase-Werte, Name, Live-URL, Owner-Mail, ogHash —
