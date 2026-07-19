@@ -1,0 +1,77 @@
+name: cockpit update
+on:
+  schedule:
+    - cron: '*/5 * * * *'      # GitHub-Minimum; der Job selbst arbeitet minuetlich (Loop)
+  workflow_dispatch: {}
+permissions:
+  contents: write
+  actions: write               # self-dispatch: der Job kettet sich am Ende selbst neu an
+concurrency:
+  group: cockpit-update
+  cancel-in-progress: false     # Jobs reihen sich nahtlos aneinander
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 27
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: deps
+        run: pip -q install google-auth requests yfinance
+      - name: service-account key
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          if [ -z "$GCP_SA_KEY" ]; then echo "::error::Secret GCP_SA_KEY fehlt"; exit 1; fi
+          printf '%s' "$GCP_SA_KEY" > /tmp/sa.json
+      - name: benchmarks (einmal pro Job)
+        working-directory: pipeline
+        continue-on-error: true
+        run: python bench_fetch.py
+      - name: live loop (minuetliche Zyklen, Frische via Firestore)
+        env:
+          SA_KEY: /tmp/sa.json
+          DEPOT_XML: /tmp/depot.xml
+          NO_PUSH: '1'
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+        working-directory: pipeline
+        run: |
+          for i in $(seq 1 22); do
+            t0=$(date +%s)
+            # pick up template/script pushes mid-job (otherwise a running job keeps
+            # building with its old checkout for up to 22 minutes)
+            git -C .. fetch -q origin && git -C .. checkout -q origin/main -- pipeline/ .github/ || true
+            python drive_fetch.py /tmp/depot.xml || true
+            python firestore_sync.py pull || true
+            MISSING_ONLY=1 python bench_fetch.py || true
+            python sec_prefetch.py || true
+            python sa_fetch.py || true
+            python pp_sync.py 2>&1 | tail -2 || true
+            if [ $((i % 5)) -eq 1 ]; then python social_sync.py || true; fi
+            if [ $((i % 2)) -eq 1 ]; then python ir_sweep.py || true; fi
+            python build.py | tail -1 || true
+            python firestore_sync.py push || true
+            cp -f cockpit.html ../index.html
+            cp -f cik.json ../cik.json 2>/dev/null || true
+            cp -f rs_prefetch.json ../rs_prefetch.json 2>/dev/null || true
+            el=$(( $(date +%s) - t0 )); [ $el -lt 60 ] && sleep $((60 - el))
+          done
+      - name: commit & push (einmal pro Job — schont GitHub-Pages-Limits)
+        if: always()   # auch bei Timeout committen — sonst gehen Zaehler (sa_budget) und Daten verloren
+        run: |
+          git config user.name "cockpit-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "cloud update $(date -u +%F-%H%MZ)" || echo "keine Aenderungen"
+          git pull --rebase -X ours || true
+          git push || true
+      - name: self-dispatch (GitHub drosselt cron um Stunden — die Kette haelt den Minutentakt)
+        if: always()
+        run: |
+          curl -s -X POST \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/update.yml/dispatches \
+            -d '{"ref":"main"}' && echo "next run dispatched"

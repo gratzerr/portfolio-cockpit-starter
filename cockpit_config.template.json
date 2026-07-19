@@ -1,0 +1,10 @@
+{
+  "_hinweis": "Diese Datei nach cockpit_config.json kopieren und ALLE Werte ersetzen. Ohne diese Datei baut build.py mit den Rafael-Standardwerten!",
+  "firebaseApiKey": "<< Firebase Console -> Projekteinstellungen -> Web-App -> apiKey >>",
+  "firebaseAuthDomain": "<<projekt-id>>.firebaseapp.com",
+  "firebaseProjectId": "<<projekt-id>>",
+  "portfolioName": "<< z.B. Max' Portfolio >>",
+  "liveUrl": "https://<<github-name>>.github.io/<<repo-name>>/",
+  "ownerEmail": "<< google-mail des Besitzers >>",
+  "ogHash": "<< SHA-256-Hex des Geheim-Tokens; erzeugen mit: python3 -c \"import secrets,hashlib; t=secrets.token_hex(12); print('TOKEN (geheim halten):',t); print('ogHash:',hashlib.sha256(t.encode()).hexdigest())\" >>"
+}
