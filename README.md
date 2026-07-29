@@ -65,7 +65,7 @@ service cloud.firestore {
 1. Alle Dateien aus diesem `starter-kit/`-Ordner ins Repo:
    - Skripte + `template.html` → in einen Ordner `pipeline/`
    - `workflow-vorlage/update.yml` → **erst nach Schritt 3** (Secrets gesetzt!) nach `.github/workflows/update.yml` verschieben — vorher würde der Workflow ins Leere laufen und Fehler-Mails schicken
-   - `sw.js`, `robots.txt` → Repo-Wurzel
+   - `sw.js`, `robots.txt`, `manifest.json`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` → Repo-Wurzel (macht die Seite als iPhone/Android-App installierbar: Safari → Teilen → Zum Home-Bildschirm; der App-Name folgt automatisch dem Portfolio-Namen)
 2. `cockpit_config.template.json` → als `pipeline/cockpit_config.json` speichern und
    **alle** Platzhalter füllen (Firebase-Werte, Name, Live-URL, Owner-Mail, ogHash —
    Kommando zum Erzeugen des Geheim-Tokens steht in der Datei; Token privat aufheben!).

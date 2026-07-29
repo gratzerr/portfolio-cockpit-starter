@@ -157,5 +157,90 @@ def main():
         json.dump(res, open(OUT, "w"), separators=(",", ":"))
         print(f"rs_prefetch.json: {len(res)} tickers, {os.path.getsize(OUT)//1024}KB")
 
+# ---- S&P-500 static cache: rs/<TK>.json on the Pages CDN. The heavyweights whose
+# 20-year filing histories are SLOW through the client proxies are exactly the ones
+# people search — pre-baking them makes any big-cap open instantly ("immer
+# augenblicklich"). Long-tail small caps stay on the client path (short histories = fast).
+UNIVERSE_URL = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv"
+
+def rs_dir():
+    base = os.path.dirname(ROOT) if os.path.basename(ROOT) == "pipeline" else os.path.join(ROOT, "site")
+    d = os.path.join(base, "rs")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+def universe():
+    f = os.path.join(ROOT, "universe.json")
+    try:
+        u = json.load(open(f))
+        if time.time() - u.get("_ts", 0) < 7 * 86400: return u["list"]
+    except Exception: pass
+    try:
+        import csv, io
+        req = urllib.request.Request(UNIVERSE_URL, headers=UA)
+        txt = urllib.request.urlopen(req, timeout=20).read().decode()
+        rows = list(csv.DictReader(io.StringIO(txt)))
+        lst = [[r["Symbol"].strip().replace(".", "-"), int(r["CIK"])] for r in rows if r.get("CIK")]
+        if len(lst) > 400:
+            json.dump({"_ts": int(time.time()), "list": lst}, open(f, "w"))
+            return lst
+    except Exception: pass
+    try: return json.load(open(f))["list"]
+    except Exception: return []
+
+def full_universe():
+    """S&P-500 FIRST (priority fill), then EVERY SEC-listed ticker from cik.json —
+    'geht das auch sofort': after the sweep, any US ticker opens instantly."""
+    import re
+    lst = universe()
+    seen = {tk for tk, _ in lst}
+    try:
+        m = json.load(open(os.path.join(ROOT, "cik.json")))
+        for tk, cik in m.items():
+            if tk in seen or not re.fullmatch(r"[A-Za-z0-9.-]{1,10}", tk): continue
+            lst.append([tk, int(cik)]); seen.add(tk)
+    except Exception: pass
+    return lst
+
+def sweep_universe(budget_s=25, stale_days=7):
+    d = rs_dir()
+    state_f = os.path.join(d, "_state.json")   # freshness lives HERE — content files only
+    try: state = json.load(open(state_f))       # change on REAL data changes (git history!)
+    except Exception: state = {}
+    now = time.time()
+    todo = []
+    for tk, cik in full_universe():
+        ts = state.get(tk, 0)
+        if not ts and not os.path.exists(os.path.join(d, tk + ".json")): ts = 0
+        if now - ts < stale_days * 86400: continue
+        todo.append((ts, tk, cik))
+    if not todo: return
+    todo.sort(key=lambda x: x[0])   # missing / stalest first; universe order breaks ties (S&P first)
+    done = 0; t0 = time.time()
+    for ts, tk, cik in todo:
+        if time.time() - t0 > budget_s: break
+        data = {}
+        for key, (tax, tags, unit, inst, kind) in CONCEPTS.items():
+            parts = []
+            for t in tags:
+                try:
+                    parts.append(series(fetch_concept(cik, tax, t), unit, inst, kind == "avg"))
+                except Exception:
+                    continue
+                time.sleep(0.12)   # SEC fair-use pacing
+            if parts: data[key] = merge(parts)
+        p = os.path.join(d, tk + ".json")
+        new = json.dumps(data, separators=(",", ":"))
+        old = None
+        try: old = open(p).read()
+        except Exception: pass
+        if new != old and (data.get("revenue") or data.get("netInc") or data.get("totalAssets")):
+            open(p, "w").write(new)
+        state[tk] = int(now); done += 1
+    json.dump(state, open(state_f, "w"))
+    print(f"rs/ universe: {done} refreshed, {len(todo)-done} pending")
+
 if __name__ == "__main__":
     main()
+    try: sweep_universe()
+    except Exception as e: print("universe sweep skipped:", e)

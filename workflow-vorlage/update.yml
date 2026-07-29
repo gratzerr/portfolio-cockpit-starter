@@ -38,7 +38,11 @@ jobs:
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
         working-directory: pipeline
         run: |
+          JOB_T0=$(date +%s)
           for i in $(seq 1 22); do
+            # Zeitbremse: Commit-Step MUSS vor dem 27-Min-Timeout laufen (Universe-Sweep
+            # verlaengert Zyklen) — sonst enden Jobs als "cancelled" + Fehler-Mails
+            [ $(( $(date +%s) - JOB_T0 )) -gt 1260 ] && break
             t0=$(date +%s)
             # pick up template/script pushes mid-job (otherwise a running job keeps
             # building with its old checkout for up to 22 minutes)

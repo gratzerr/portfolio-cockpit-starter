@@ -1,5 +1,11 @@
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Rafael's Portfolio">
+<meta name="theme-color" content="#0f131c">
+<link rel="manifest" href="manifest.json">
 <meta name="robots" content="noindex, nofollow">
 <title>Rafael's Portfolio</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101828'/%3E%3Cpath d='M12 44L26 30l10 8 16-20' fill='none' stroke='%233ecb63' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='52' cy='18' r='4.5' fill='%233ecb63'/%3E%3C/svg%3E">
@@ -45,7 +51,8 @@
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
     font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
   a{color:inherit}
-  .wrap{max-width:1180px;margin:0 auto;padding:26px 20px 80px}
+  .wrap{max-width:1180px;margin:0 auto;padding:26px 20px 80px;
+    padding-top:calc(26px + env(safe-area-inset-top))}   /* notch/Dynamic Island clearance in standalone */
   .tnum{font-variant-numeric:tabular-nums}
 
   header.top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:22px}
@@ -68,11 +75,13 @@
   .tabbar button.on{background:var(--accent);color:#fff}
   [data-tab]:not(.tabon){display:none!important}   /* .tabon keeps the element's own display */
 
-  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
+  .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:20px}
   .tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
     padding:18px 19px 16px;box-shadow:var(--shadow)}
   .tile .lab{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;font-weight:650}
   .tile .val{font-size:29px;font-weight:740;margin-top:7px;letter-spacing:-.8px;font-variant-numeric:tabular-nums}
+  .tile.hero .val{font-size:31px;letter-spacing:-1px}   /* der aktuelle Depotwert soll dominieren */
+  .tile.hero{border-color:color-mix(in srgb, var(--accent) 30%, var(--border))}
   .tile .note{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.55}
   .up{color:var(--up)} .down{color:var(--down)}
 
@@ -304,10 +313,42 @@
   .foot{color:var(--muted);font-size:12px;text-align:center;margin-top:26px;line-height:1.6}
   .morebtn{background:none;border:0;color:var(--accent);font-size:12.5px;font-weight:600;cursor:pointer;padding:8px 0 0;font-family:inherit}
 
+  /* ---- phone polish (Rafael: "mach es perfekt" beim Teilen) ---- */
+  .bottomnav{display:none}
+  @media(max-width:640px){
+    html{-webkit-text-size-adjust:100%}
+    /* native-app bottom navigation: ALL six tabs always visible */
+    .tabbar{display:none}
+    .bottomnav{position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;
+      background:color-mix(in srgb, var(--surface) 90%, transparent);
+      backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+      border-top:1px solid var(--border);
+      padding:6px 4px calc(6px + env(safe-area-inset-bottom));
+      transform:translateZ(0);will-change:transform}   /* eigene Compositor-Ebene: iOS-"Mitspringen" beim Tab-Scroll verhindern */
+    .bottomnav button{flex:1;min-width:0;border:0;background:none;color:var(--muted);
+      font:inherit;font-size:9.5px;font-weight:650;letter-spacing:.1px;
+      display:flex;flex-direction:column;align-items:center;gap:3px;padding:4px 0;cursor:pointer}
+    .bottomnav button svg{width:21px;height:21px;flex:none}
+    .bottomnav button.on{color:var(--accent)}
+    /* !important: the later ≤860px rule would otherwise override this back to 48px
+       and content would slide under the bottom nav */
+    .wrap{padding-bottom:calc(96px + env(safe-area-inset-bottom))!important}
+    /* tables: ticker column stays pinned while swiping through the value columns */
+    .htable th:first-child,.htable td:first-child{position:sticky;left:0;z-index:2;background:var(--plane)}
+    .htable tbody tr:hover td:first-child{background:var(--plane)}
+    .tfsel button{padding:5px 9px;font-size:11.5px}
+    .themebtn,.sd-x{width:36px;height:36px}
+    /* iOS zooms into focused inputs below 16px — keep the layout still */
+    #rs-search,input[type=date],input[type=text]{font-size:16px!important}
+    .sd-ranges button{padding:6px 11px}
+    header.top{margin-bottom:14px}
+  }
   @media(max-width:860px){
     .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
     .tile{padding:13px 14px;min-width:0}
     .tile .val{font-size:20px;letter-spacing:-.4px}
+    .tile.hero{grid-column:1/-1}   /* Handy: Depotwert als volle Breite ganz oben */
+    .tile.hero .val{font-size:34px;letter-spacing:-.9px}
     .tile .note{font-size:11.5px}
     .act{grid-template-columns:58px 60px 22px minmax(0,1fr) auto;gap:7px;font-size:12.5px}
     .act .aname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -315,7 +356,7 @@
     .alogo{width:22px;height:22px}
     .cols,.cols.eq{grid-template-columns:1fr}
     .hgrid{grid-template-columns:1fr}
-    .wrap{padding:16px 12px 48px}
+    .wrap{padding:16px 12px 48px;padding-top:calc(16px + env(safe-area-inset-top))}
     .sparkrow{flex-direction:column;align-items:stretch;gap:8px}
     .rng{width:auto}
   }
@@ -357,6 +398,16 @@
 </div>
 
 <div class="secov" id="secov"><div class="secmodal" id="secmodal"></div></div>
+
+<!-- mobile bottom navigation (native-app style) — inherits all [data-tabbtn] wiring -->
+<nav class="bottomnav" id="bottomnav">
+  <button data-tabbtn="portfolio" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>Portfolio</button>
+  <button data-tabbtn="news"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-4 0V6"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/></svg>News</button>
+  <button data-tabbtn="performance"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>Perf</button>
+  <button data-tabbtn="payments"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8M12 6v2m0 8v2"/></svg>Pay</button>
+  <button data-tabbtn="watchlist"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>Watch</button>
+  <button data-tabbtn="research"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>Research</button>
+</nav>
 <div class="wrap">
   <div class="breaking" id="breaking"></div>
   <header class="top">
@@ -544,7 +595,17 @@ const tIdx = tk => DATA.holdings.findIndex(x=>x.ticker===tk);
 const enDate = s => new Date(s).toLocaleDateString('en-US',{month:'short',day:'2-digit'});
 
 /* ---- KPI tiles ---- */
+/* boot settle: mehrere Startquellen (Store -> Engine -> Parqet -> Kurse) aktualisieren
+   die Kacheln kurz nacheinander — sichtbares "Blinken". Erste Malung sofort, alle
+   weiteren Updates der ersten 2.5s werden zu EINEM gebuendelt; danach normal. */
+const _kpiBootT=Date.now(); let _kpiFirst=true,_kpiTmr=null;
 function renderKpis(){
+  if(_kpiFirst){ _kpiFirst=false; _renderKpis(); return; }
+  const left=_kpiBootT+2500-Date.now();
+  if(left>0){ clearTimeout(_kpiTmr); _kpiTmr=setTimeout(_renderKpis,left); return; }
+  _renderKpis();
+}
+function _renderKpis(){
   const d=DATA;
   // capital gains from the PP-exact FIFO engine (depot.xml), USD at tx-date FX
   const un=d.ppUnrealizedUsd!=null?d.ppUnrealizedUsd:d.netGainUnrealized;
@@ -552,17 +613,41 @@ function renderKpis(){
   const gn=(un||0)>=0, rz=(rl||0)>=0;
   // in EUR mode use the engine-exact EUR figures (verified vs the PP app), not FX-converted USD
   const money=(usd,eur)=>_priv?MASK:(_ccy==='EUR'&&eur!=null?fmtE(eur):fmtUsd(usd));
+  /* Today: live intraday move across all positions (falls back to the engine's
+     last daily step before the first price fetch lands) */
+  const _today=(()=>{ let ch=0,base=0,any=false;
+    d.holdings.forEach(h=>{ if(h.assetType==='cash') return; const v=h.value||0;
+      if(h.dayChange!=null&&isFinite(h.dayChange)){ const prev=v/(1+h.dayChange/100); ch+=v-prev; base+=prev; any=true; }
+      else base+=v; });
+    base+=d.cashValue||0;
+    if(any) return {usd:ch,pct:base?ch/base*100:0};
+    const s=d.chartPP; if(s&&s.length>1){ const a=s[s.length-2].v,b=s[s.length-1].v;
+      return {usd:b-a,pct:a?(b/a-1)*100:0}; }
+    return null; })();
   const tiles=[
-    {lab:'Portfolio Value', val:fmtUsd(d.totalValue),
+    {lab:'Portfolio Value', val:fmtUsd(d.totalValue), hero:1,
      note:_ccy+' · '+(d.holdings.length-1)+' positions · net cash '+fmtUsd(d.cashValue)
        +(d.ppNetContribUsd!=null?'<br>invested capital '+money(d.ppNetContribUsd,d.ppNetContribEur):'')},
+    {lab:'Today', val:_today?fmtPct(_today.pct):'—',
+     note:_today?(_priv?MASK:fmtUsd(_today.usd))+' vs yesterday':'—',
+     cls:_today&&_today.pct>=0?'up':'down'},
     {lab:'Unrealized Gain', val:money(un,d.ppUnrealizedEur), note:'current holdings · FIFO vs cost', cls:gn?'up':'down'},
     {lab:'Realized Gain', val:money(rl,d.ppRealizedEur), note:'booked from sells since 2022', cls:rz?'up':'down'},
     {lab:'Return YTD', val:fmtPct(d.ttwrorYtd||0), note:'since inception (2022) '+fmtPct(d.since2022!=null?d.since2022:(d.pp&&d.pp.ppReferenceTtwror)||0)+'<br>IRR '+(d.izf||0).toFixed(2)+'%', cls:(d.ttwrorYtd||0)>=0?'up':'down'},
   ];
   document.getElementById('kpis').innerHTML = tiles.map(t=>
-    `<div class="tile"><div class="lab">${t.lab}</div>
+    `<div class="tile${t.hero?' hero':''}"><div class="lab">${t.lab}</div>
      <div class="val ${t.cls||''}">${t.val}</div><div class="note">${t.note}</div></div>`).join('');
+  /* der Depotwert ZAEHLT zum neuen Stand statt hart zu springen (Broker-App-Gefuehl) */
+  const _pvPrev=window._pvShown; window._pvShown=d.totalValue;
+  if(_pvPrev!=null&&_pvPrev!==d.totalValue&&!_priv){
+    const el=document.querySelector('.tile.hero .val');
+    if(el){ const t0=performance.now(),dur=650,from=_pvPrev,to=d.totalValue;
+      const step=ts=>{ const k=Math.min(1,(ts-t0)/dur);
+        el.textContent=fmtUsd(Math.round(from+(to-from)*(1-Math.pow(1-k,3))));
+        if(k<1&&window._pvShown===to) requestAnimationFrame(step); };
+      requestAnimationFrame(step); }
+  }
 }
 
 /* ---- PP total-portfolio strip (from depot.xml via pp_sync.py) ---- */
@@ -693,10 +778,16 @@ function renderChart(){
     const p=pts[bi], px=X(p.d), py=Y(val(p));
     cx.setAttribute('x1',px);cx.setAttribute('x2',px);cx.style.opacity=1;
     cd.setAttribute('cx',px);cd.setAttribute('cy',py);cd.style.opacity=1;
-    tip.style.opacity=1; tip.style.left=(px/W*r.width)+'px'; tip.style.top=(py/H*r.height)+'px';
     const dt=new Date(p.d).toLocaleDateString('en-US',{day:'2-digit',month:'short',year:'numeric'});
     const tv=_priv?MASK:(curSym()+Math.abs(Math.round(val(p))).toLocaleString('en-US'));
     tip.innerHTML=`<span class="tv">${tv}</span> · ${dt}`;
+    /* clamp inside the chart: at the edges (e.g. Jahresanfang bei YTD) the centered
+       tooltip would otherwise be cut off — especially on phones */
+    tip.style.opacity=1;
+    const tw=tip.offsetWidth||120, th=tip.offsetHeight||28;
+    const lx=Math.max(tw/2+4, Math.min(r.width-tw/2-4, px/W*r.width));
+    const ty=Math.max(th+10, py/H*r.height);
+    tip.style.left=lx+'px'; tip.style.top=ty+'px';
   }
   svg.addEventListener('mousemove',move);
   svg.addEventListener('touchmove',move,{passive:true});
@@ -846,6 +937,17 @@ const isOwner=()=>!!(_user && _cfg.owner && _user.email===_cfg.owner);
    Rafael's devices from ever needing the login just to SEE his own portfolio) */
 const OG_HASH='4bc2b77abbd6131c88235e7de77c55e13c8ed7a573ccdaec8e45a9b1dbcf93f7';
 const ownerDev=()=>{ if(isOwner()) return true; try{ return localStorage.getItem('pc-og')==='1'; }catch(e){ return false; } };
+/* standalone home-screen apps have their OWN localStorage — the lock screen offers a
+   manual code entry so the owner can unlock the installed app directly */
+async function ogUnlock(){
+  const tok=prompt('Geräte-Code eingeben:'); if(!tok) return;
+  try{
+    const buf=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(tok.trim()));
+    const hex=[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+    if(hex===OG_HASH){ localStorage.setItem('pc-og','1'); applyVisibility(); }
+    else alert('Code falsch');
+  }catch(e){}
+}
 (async()=>{ try{
   const tok=new URLSearchParams(location.search).get('og');
   if(!tok) return;
@@ -859,6 +961,7 @@ const ownerDev=()=>{ if(isOwner()) return true; try{ return localStorage.getItem
 function applyName(){
   const el=document.getElementById('ptitle'); if(el) el.textContent=_cfg.name;
   document.title=_cfg.name;
+  try{ localStorage.setItem('pc-name',_cfg.name); }catch(e){}   // next load paints the right name instantly
 }
 function applyVisibility(){
   /* guest mode (anyone who isn't the signed-in owner): read-only. No settings,
@@ -884,7 +987,7 @@ function applyVisibility(){
   const locked=(_cfg.public===false||_cfg.hidden===true) && !ownerDev();
   if(locked){
     if(!ov){ ov=document.createElement('div'); ov.id='lockov';
-      ov.innerHTML='<div class="lockbox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="30" height="30" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><div class="lt1">This portfolio is private</div><div class="lt2">The owner has turned off public sharing.</div><div style="margin-top:14px"><button class="secbtn" onclick="ownerSignIn()">Owner sign in with Google</button></div></div>';
+      ov.innerHTML='<div class="lockbox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="30" height="30" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><div class="lt1">This portfolio is private</div><div class="lt2">The owner has turned off public sharing.</div><div style="margin-top:14px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="secbtn" onclick="ownerSignIn()">Owner sign in with Google</button><button class="secbtn" onclick="ogUnlock()">Geräte-Code</button></div></div>';
       document.body.appendChild(ov); }
     ov.style.display='flex';
   } else if(ov) ov.style.display='none';
@@ -1374,7 +1477,9 @@ function initTheme(){
   if(window._themeInit) return; window._themeInit=true;
   const btn=document.getElementById('themebtn');
   const saved=localStorage.getItem('pc-theme');
-  if(saved) document.documentElement.setAttribute('data-theme',saved);
+  // first visit defaults to DARK regardless of system theme (Rafael 2026-07-21);
+  // a saved toggle choice always wins
+  document.documentElement.setAttribute('data-theme',saved||'dark');
   const icon=()=>{ btn.innerHTML=isDarkTheme()?SVG_SUN:SVG_MOON; };
   icon();
   btn.addEventListener('click',()=>{
@@ -1470,6 +1575,7 @@ async function refreshPrices(){
   if(!any) return;
   liveState.lastPrice=new Date();
   renderHoldingsTable(); renderHoldings(); setBadge();
+  renderKpis();   // the Today tile ticks with the live prices
   _saveLast();   // a refresh must repaint the LAST-SEEN prices, not minute-old engine ones
 }
 /* persist the enriched on-screen state (incl. livePrice/dayChange) — a page refresh
@@ -1851,6 +1957,13 @@ function startLive(){
   setInterval(()=>refreshSEC().catch(()=>{}), 90000);       // SEC EDGAR filing watch every 90s
   setInterval(()=>refreshNews().catch(()=>{}), 900000);     // news (GDELT) every 15 min
   setInterval(()=>fsDataPoll().catch(()=>{}), 60000);       // minute-fresh engine data from Firestore
+  /* returning to the app/tab (no reload): refresh IMMEDIATELY — background tabs get
+     throttled, and a resumed standalone app would otherwise show its pre-sleep state
+     for up to a minute */
+  const wake=()=>{ if(document.visibilityState!=='visible') return;
+    fsDataPoll().catch(()=>{}); refreshPrices().catch(()=>{}); refreshParqet().catch(()=>{}); };
+  document.addEventListener('visibilitychange',wake);
+  window.addEventListener('pageshow',e=>{ if(e.persisted) wake(); });   // bfcache restore
 }
 
 function boot(){
@@ -1873,10 +1986,13 @@ function boot(){
   }
   /* first paint from the freshest data THIS DEVICE has seen: a browser-cached old
      index.html must not flash a days-old total before the Firestore poll lands */
+  /* the baked default name must never flash — use the locally remembered one */
+  try{ const n=localStorage.getItem('pc-name'); if(n){ _cfg.name=n; applyName(); } }catch(e){}
+  let _fromStore=false;
   try{
     const s=localStorage.getItem('pc-lastdata');
     if(s&&DATA){ const j=JSON.parse(s);
-      if(j&&j.generated&&(!DATA.generated||j.generated>DATA.generated)) DATA=j; }
+      if(j&&j.generated&&(!DATA.generated||j.generated>DATA.generated)){ DATA=j; _fromStore=true; } }
   }catch(e){}
   /* the STATIC veil (first element in the markup) is already covering the page.
      Lift it immediately when the data on this device is fresh (<3 min); otherwise
@@ -1885,7 +2001,12 @@ function boot(){
   window._veilOff=()=>{ const e=document.getElementById('bootveil'); if(e) e.remove(); window._veilOff=null; };
   try{
     const age=Date.now()-Date.parse(String(DATA.generated||'').replace(' ','T')+':00Z');
-    if(age<3*60000){ window._veilOff(); liveState.lastEngine=new Date(); setBadge(); }   // fresh = LIVE, no Snapshot flash
+    /* instant paint ("es darf nur eine ms laden"): the LAST-SEEN state (pc-lastdata,
+       incl. live prices) paints immediately for up to 4h — it is what the user just
+       had on screen; the instant poll corrects within ~0.5s. The spinner remains
+       ONLY when no usable local state exists (first visit / days-old cached HTML). */
+    if(age<45000||( _fromStore&&age<4*3600000)){ window._veilOff();
+      liveState.lastEngine=new Date(); setBadge(); }   // Badge ab erster Malung LIVE — kein leerer Moment
     else setTimeout(()=>{ if(window._veilOff){ window._veilOff();
       const b=document.getElementById('livebadge'); if(b&&!b.textContent) b.textContent='Snapshot'; } },3500);
   }catch(e){ window._veilOff(); }
@@ -1908,6 +2029,7 @@ let _tab='portfolio';
 function switchTab(t){
   const changed=(_tab!==t);
   _tab=t;
+  if(changed) window.scrollTo(0,0);   // ein Tab-Wechsel startet oben — kein Scroll-Sprung bei kurzen Tabs
   document.querySelectorAll('[data-tab]').forEach(el=>el.classList.toggle('tabon',el.dataset.tab===t));
   document.querySelectorAll('[data-tabbtn]').forEach(b=>b.classList.toggle('on',b.dataset.tabbtn===t));
   try{ history.replaceState(null,'','#'+t); }catch(e){}
@@ -2387,6 +2509,26 @@ let _rsRot=0;
    corsproxy otherwise costs a 6.5s timeout per tag before rotating -> minute-long loads) */
 let _rsBest=(()=>{ try{ const v=+localStorage.getItem('pc-rsproxy'); return v>=0&&v<RS_PROXIES.length?v:-1; }catch(e){ return -1; } })();
 function _rsRemember(p){ if(_rsBest!==p){ _rsBest=p; try{ localStorage.setItem('pc-rsproxy',String(p)); }catch(e){} } }
+/* companyfacts = ALL concepts of a company in ONE request — first visit of a big
+   filer (ORCL: ~40 concept round-trips, 30-45s) collapses to one download (2-5s) */
+async function rsFetchFacts(cik){
+  const u=`https://data.sec.gov/api/xbrl/companyfacts/CIK${String(cik).padStart(10,'0')}.json`;
+  const via=async(mk,ms)=>{ const c=new AbortController(); const to=setTimeout(()=>c.abort(),ms);
+    try{ const r=await fetch(mk(u),{signal:c.signal});
+      const t=await r.text(); const i=t.indexOf('{"'); if(i<0) throw new Error('bad');
+      const j=JSON.parse(t.slice(i));
+      if(!j.facts) throw new Error('nofacts');
+      return j.facts;
+    } finally { clearTimeout(to); } };
+  const order=[]; if(_rsBest>=0) order.push(_rsBest);
+  for(let k=0;k<RS_PROXIES.length;k++){ if(!order.includes(k)) order.push(k); }
+  let lastErr;
+  for(const p of order){
+    try{ const f=await via(RS_PROXIES[p],15000); _rsRemember(p); return f; }
+    catch(e){ lastErr=e; }
+  }
+  throw lastErr;
+}
 async function rsFetchConcept(cik,tax,tag){
   const u=`https://data.sec.gov/api/xbrl/companyconcept/CIK${String(cik).padStart(10,'0')}/${tax}/${tag}.json`;
   const via=async(mk,ms)=>{ const c=new AbortController(); const to=setTimeout(()=>c.abort(),ms);
@@ -2508,10 +2650,36 @@ async function rsLoad(tk){
       renderResearch(); return;
     }
   }catch(e){}
+  /* S&P-500 static cache on the Pages CDN — big caps open instantly, zero SEC calls */
+  try{
+    const r=await fetch('rs/'+encodeURIComponent(tk)+'.json',{cache:'no-store'});
+    if(r.ok){ const d=await r.json();
+      if(RS.tk===tk&&(d.revenue||d.netInc)){ delete d._ts;
+        rsDerive(d); RS.data=d; RS.loading=false; _rsCache[tk]=d;
+        renderResearch(); return; } }
+  }catch(e){}
   const cik=await rsCik(tk);
   if(RS.tk!==tk) return;
   if(!cik){ RS.loading=false; RS.noSec=true; renderResearch(); return; }
   const data=RS.data;
+  /* RACE: companyfacts (everything in ONE download) runs IN PARALLEL with the
+     per-concept fetches. Small filers finish via facts in ~2s; for mega-caps whose
+     facts file is huge, the per-concept stream keeps painting cards progressively
+     and facts back-fills whatever is still missing the moment it lands. */
+  rsFetchFacts(cik).then(facts=>{
+    if(RS.tk!==tk) return;
+    Object.entries(RS_CONCEPTS).forEach(([key,[tax,tags,unit,inst,kind]])=>{
+      if(data[key]&&(data[key].q||[]).length&&!data[key].err) return;   // stream already delivered this one
+      const parts=[];
+      tags.forEach(t=>{ const [tx,tag]=t.includes(':')?t.split(':'):[tax,t];
+        const f=(facts[tx]||{})[tag];
+        if(f&&f.units) parts.push(rsSeries({units:f.units},unit,inst,kind==='avg')); });
+      data[key]=parts.length?rsMerge(parts):{q:[],a:[]};   // legitimately empty ≠ error
+    });
+    rsDerive(data); RS.loading=false; _rsCache[tk]=data;
+    if(!Object.values(data).some(v=>v&&v.err)) rsCacheSet(tk,data);
+    renderResearch();
+  }).catch(()=>{});
   let pending=Object.keys(RS_CONCEPTS).length;
   Object.entries(RS_CONCEPTS).forEach(([key,[tax,tags,unit,inst,kind]])=>{
     (async()=>{
@@ -3415,7 +3583,7 @@ function renderPayments(){
     const h=Math.abs(v)/mx*(H-padB-padT);
     const col=def.flow===1?(v>=0?cvar('--up'):cvar('--down')):def.flow===-1?cvar('--down'):cvar('--accent');
     if(v) bars+=`<rect x="${(x-bw/2).toFixed(1)}" y="${(H-padB-h).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(2,h).toFixed(1)}" rx="3" fill="${col}" opacity="0.85"><title>${m}: ${money(pairs[i][1],pairs[i][0])}</title></rect>`;
-    const every=months.length>18?3:1;
+    const every=months.length>36?6:months.length>18?3:1;
     if(i%every===0) labels+=`<text x="${x.toFixed(1)}" y="${H-7}" text-anchor="middle" font-size="10" fill="${cvar('--muted')}" font-family="system-ui">${months.length>13?m.slice(2).replace('-','/'):['J','F','M','A','M','J','J','A','S','O','N','D'][+m.slice(5,7)-1]}</text>`;
   });
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
