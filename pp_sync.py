@@ -37,7 +37,7 @@ XStream parsing rules (hard-won, do not simplify):
 
 Run before build.py. Refreshes fx_daily.json (ECB via frankfurter, multi-ccy).
 """
-import xml.etree.ElementTree as ET, re, bisect, json, os, subprocess, datetime, sys
+import xml.etree.ElementTree as ET, re, bisect, json, os, subprocess, datetime, sys, time
 from collections import defaultdict
 
 ROOT=os.path.dirname(os.path.abspath(__file__))
@@ -270,6 +270,8 @@ def us_eff_date():
     while d.weekday()>=5: d-=datetime.timedelta(days=1)
     return d.isoformat()
 
+PREV={}   # si -> Vortagesschluss desselben Kursanbieters wie der Live-Kurs
+
 def live_overlay():
     net=defaultdict(float)
     for t in txs.values():
@@ -285,26 +287,94 @@ def live_overlay():
         return
     eff=us_eff_date()
     ok=0
+    # Letzte GUTE Optionskurse: die Optionsketten-Abfrage ist wackelig (Rate-Limits),
+    # und ohne Cache fiel der Kurs dann auf den PP-Datei-Wert = Kaufpreis zurueck
+    # (ABVX-Call sprang staendig zwischen 27.85 und 30.90, 2026-07-27)
+    PREV.clear()   # Vortagesschluss AUS DERSELBEN Quelle wie der Live-Kurs
+    OQ_PATH=os.path.join(ROOT,"opt_quotes.json")
+    try: oq=json.load(open(OQ_PATH))
+    except Exception: oq={}
+    oq_dirty=False
     for si in held:
         tk=SEC[si]["tk"]
-        if not tk or len(tk)>10: continue          # options etc.: keep file quotes
+        if not tk: continue
+        if len(tk)>10 and not re.match(r"^[A-Z.]{1,6}\d{6}[CP]\d{8}$", tk):
+            continue   # Fremdformate: Datei-Kurse behalten. Echte OCC-Optionen werden
+                       # live quotiert — PP kann sie nicht, sonst friert der Kurs am
+                       # Kauftag ein (ABVX-Call stand 5 Tage auf 30.90, 2026-07-26)
+        occ = len(tk)>10
         try:
-            hist=yf.Ticker(tk).history(period="10d")["Close"]
+            if occ:
+                # OCC-Optionen: yfinance-history ist leer, rohes curl blockt Yahoo im
+                # CI — die Optionskette (yf.option_chain) geht ueber yfinance-Cookies
+                # und funktioniert dort. Kurs = Geld/Brief-Mitte wie beim Broker.
+                m2=re.match(r"^([A-Z.]{1,6})(\d{2})(\d{2})(\d{2})([CP])(\d{8})$", tk)
+                und,yy,mm,dd,cp,kk=m2.groups()
+                px=0.0
+                for _try in range(3):
+                    try:
+                        oc=yf.Ticker(und).option_chain(f"20{yy}-{mm}-{dd}")
+                        df=oc.calls if cp=="C" else oc.puts
+                        row=df[abs(df["strike"]-int(kk)/1000.0)<1e-6]
+                        if len(row):
+                            r0=row.iloc[0]
+                            bid=float(r0.get("bid") or 0); ask=float(r0.get("ask") or 0)
+                            px=(bid+ask)/2.0 if (bid>0 and ask>0) else float(r0.get("lastPrice") or 0)
+                        if px>0: break
+                    except Exception:
+                        pass
+                    time.sleep(1.5)
+                if px>0:
+                    c0=oq.get(tk)
+                    if c0 and c0.get("d") and c0["d"]<eff and float(c0.get("px") or 0)>0:
+                        PREV[si]=float(c0["px"])           # Stand von gestern = Vortagesschluss
+                    elif c0 and c0.get("prev"):
+                        PREV[si]=float(c0["prev"])
+                    oq[tk]={"d":eff,"px":px,
+                            "prev":PREV.get(si) or (c0 or {}).get("prev")}; oq_dirty=True
+                else:
+                    c=oq.get(tk)          # Abruf gescheitert: letzten GUTEN Kurs halten,
+                    if not c: continue    # niemals auf den PP-Kaufpreis zurueckfallen
+                    px=float(c["px"])
+                pairs=[(eff, px)]
+            else:
+                h2=yf.Ticker(tk).history(period="10d")["Close"]
+                pairs=[(idx.strftime("%Y-%m-%d"), float(px)) for idx,px in h2.items()]
+                pv=[p for d,p in sorted(pairs) if d<eff and p>0]
+                if pv: PREV[si]=pv[-1]
+                # Yahoo liefert fuer HEUTE keinen Balken (Datenstau wie am 2026-08-06:
+                # alle Kurse standen auf dem Vortagesschluss, DCTH real ~15 vs. 12.63):
+                # Stooq als unabhaengige Zweitquelle fuer den laufenden Kurs — nur
+                # US-Plain-Ticker; PREV bleibt der offizielle Yahoo-Schlusskurs
+                if not any(d>=eff for d,_ in pairs) and re.match(r"^[A-Z]{1,5}$", tk):
+                    try:
+                        rr=subprocess.run(["curl","-s","-m","12",
+                            f"https://stooq.com/q/l/?s={tk.lower()}.us&f=sd2t2ohlcv&h&e=csv"],
+                            capture_output=True,text=True)
+                        rows=rr.stdout.strip().split("\n")
+                        if len(rows)>=2:
+                            c=rows[1].split(",")
+                            sq_d, sq_px = c[1], float(c[6])
+                            if sq_px>0 and sq_d>=eff:
+                                pairs.append((eff, sq_px))
+                    except Exception:
+                        pass
         except Exception:
             continue
-        if hist is None or not len(hist): continue
+        if not pairs: continue
+        pairs.sort()
         ds,vs=PRICES[si]
         last_file=ds[-1] if ds else "0000"
-        added=False
-        for idx,px in hist.items():
-            d=idx.strftime("%Y-%m-%d")
+        for d,px in pairs:
             if d<=last_file or d>eff or px!=px or px<=0: continue
-            ds.append(d); vs.append(int(float(px)*1e8)); added=True
-        if added or True:
-            lastq=float(hist.iloc[-1])
-            la=LATEST[si]
-            if lastq>0 and (la is None or eff>=la[0]):
-                LATEST[si]=(eff,int(lastq*1e8)); ok+=1
+            ds.append(d); vs.append(int(px*1e8))
+        lastq=pairs[-1][1]
+        la=LATEST[si]
+        if lastq>0 and (la is None or eff>=la[0]):
+            LATEST[si]=(eff,int(lastq*1e8)); ok+=1
+    if oq_dirty:
+        try: json.dump(oq, open(OQ_PATH,"w"))
+        except Exception: pass
     print(f"live overlay: {ok}/{len(held)} held securities quoted live (gap-filled to {eff})")
 if os.environ.get("LIVE_QUOTES","1")=="1":
     live_overlay()
@@ -440,6 +510,7 @@ for s,sh in open_sh.items():
         lots[s].append([sh, to_eur(v,SEC[s]["ccy"],START), to_usd(v,SEC[s]["ccy"],START), START])
 realized_eur=0.0;realized_usd=0.0
 trades=[]   # every SELL as a closed FIFO round-trip (for the trading-record widget)
+acts=[]     # raw trade journal for the Activities feed (Parqet retired 2026-07-22)
 buys_by_sec=defaultdict(lambda: defaultdict(lambda:[0.0,0.0]))  # sec -> date -> [shares, cost_native] for chart markers
 rz_usd_by_sec=defaultdict(float)   # per-security realized (USD) for the holdings table
 rz_day=defaultdict(lambda:[0.0,0.0])   # d -> [eur, usd] realized that day (for period calc)
@@ -457,6 +528,13 @@ for t in ptx:
     elif ty=="SELL": g=t["amount"]+t["fee"]+t["tax"]
     else: g=t["amount"]
     eur=to_eur(g,t["ccy"],t["date"]);usd=to_usd(g,t["ccy"],t["date"])
+    act_row=None
+    if sh>1e-9 and ty in ("BUY","SELL","DELIVERY_INBOUND","DELIVERY_OUTBOUND"):
+        act_row={"d":t["date"],"t":"BUY" if ty in ("BUY","DELIVERY_INBOUND") else "SELL",
+                 "sec":s,"sh":round(sh,4),"px":round(g/sh,4),
+                 "ccy":t["ccy"],"amt":round(g,2),
+                 "port":(portfolios.get(t["owner"]) or {}).get("name")}
+        acts.append(act_row)
     if ty in ("BUY","DELIVERY_INBOUND"):
         lots[s].append([sh,eur,usd,t["date"]])
         if sh>1e-9:
@@ -478,6 +556,9 @@ for t in ptx:
         if ty=="SELL":
             realized_eur+=eur-basis;realized_usd+=usd-basis_u
             rz_usd_by_sec[s]+=usd-basis_u
+            if act_row is not None:      # Activities feed shows the gain of each single sell
+                act_row["gEur"]=round(eur-basis,2); act_row["gUsd"]=round(usd-basis_u,2)
+                act_row["ret"]=round((usd-basis_u)/basis_u*100,2) if basis_u>1e-6 else None
             rz_day[t["date"]][0]+=eur-basis;rz_day[t["date"]][1]+=usd-basis_u
             trades.append({"sec":s,
                 "port":(portfolios.get(t["owner"]) or {}).get("name"),
@@ -524,6 +605,20 @@ if flo*fhi<0:
         if (fm<0)==(flo<0): lo,flo=mid,fm
         else: hi,fhi=mid,fm
     izf=(lo+hi)/2*100
+
+def _day_ret(i,px_now):
+    """Kurs heute vs. Vortagesschluss, in Prozent (None wenn unbekannt)."""
+    try:
+        p=PREV.get(i)
+        if p and px_now: return round((px_now/p-1)*100,2)
+        ds,vs=PRICES[i]
+        prev=None
+        for d,v in zip(reversed(ds),reversed(vs)):
+            if d<END and v>0: prev=v/1e8; break
+        if not prev or not px_now: return None
+        return round((px_now/prev-1)*100,2)
+    except Exception:
+        return None
 
 # ---------------- cash + holdings ----------------
 cash_by_acc=[]
@@ -579,6 +674,11 @@ for si,a in posagg.items():
         "avgCost":round(basis_usd/a["net"],4) if (s["ccy"]=="USD" and a["net"]) else round(avg,4),
         "unrealRet":(round((to_usd(val,s["ccy"],END)/basis_usd-1)*100,1) if basis_usd
                      else (round((px-avg)/avg*100,1) if avg else 0)),
+        # Tagesveraenderung AUS DER ENGINE (Kurs heute vs. letzter Schlusskurs davor):
+        # die Yahoo-Variante im Client lief auf eigenem Takt und widersprach dem
+        # Gesamt-Tageswert der Kachel (Vorfall 2026-07-29)
+        "dayRet":_day_ret(si,px),
+        "prevClose":round(PREV[si],4) if PREV.get(si) else None,   # nachpruefbar: gegen welchen Kurs gerechnet wird
         "priceDate":pdate})
 holdings.sort(key=lambda h:-h["valueEur"])
 
@@ -611,8 +711,18 @@ out={"fileDate":datetime.datetime.fromtimestamp(os.path.getmtime(DEPOT)).strftim
          [[d, round(v[0],2), round(v[1]/v[0],4)] for d,v in sorted(dm.items()) if v[0]>1e-9]
          for si,dm in buys_by_sec.items()
          if sum(l[0] for l in lots.get(si,[]))>1e-6 },
+     # open FIFO lots per ticker: the individual purchases that make up the CURRENT
+     # position (date, shares, remaining basis EUR/USD) - sums to the position's cost
+     "lotsByTicker":{ (SEC[si]["tk"] or (SEC[si]["name"] or "")[:10]):
+         [{"d":l[3],"sh":round(l[0],4),"eur":round(l[1],2),"usd":round(l[2],2)}
+          for l in q if l[0]>1e-9]
+         for si,q in lots.items() if sum(l[0] for l in q)>1e-6 },
      "ports":sorted({(portfolios.get(t["owner"]) or {}).get("name") for t in txs.values()
                      if t["kind"]=="port" and t["owner"]} - {None}),
+     "acts":sorted(({**{k:v for k,v in a.items() if k!="sec"},
+                     "tk":SEC[a["sec"]]["tk"] or (SEC[a["sec"]]["name"] or "")[:10],
+                     "isin":SEC[a["sec"]]["isin"]}
+                    for a in acts), key=lambda x:x["d"], reverse=True),
      "trades":sorted(({**{k:v for k,v in tr.items() if k!="sec"},
                        "ticker":SEC[tr["sec"]]["tk"] or (SEC[tr["sec"]]["name"] or "")[:10],
                        "name":SEC[tr["sec"]]["name"],"isin":SEC[tr["sec"]]["isin"]}

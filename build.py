@@ -11,7 +11,7 @@ Writes:
 
 Re-run daily after refreshing the source JSON to keep the dashboard current.
 """
-import json, os, datetime, html
+import json, os, re, datetime, html
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -48,16 +48,6 @@ if pp:
         for h in port["holdings"]:
             if h.get("assetType") == "cash":
                 h["value"] = cash_usd
-    nvo = next((x for x in pp.get("holdings", []) if "NVO" in (x.get("ticker") or "")), None)
-    if nvo:
-        for h in port["holdings"]:
-            if h.get("assetType") == "option":
-                h["price"] = nvo["price"]
-                h["shares"] = nvo["shares"]
-                h["value"] = round(nvo["shares"] * nvo["price"])
-                if h.get("costPrice"):
-                    h["unrealizedReturn"] = round((nvo["price"]/h["costPrice"]-1)*100, 1)
-                    h["totalGainNet"] = round(h["value"] - nvo["shares"]*h["costPrice"])
     # ---- holdings reconcile: POSITIONS come from the engine (depot.xml via pp.json);
     # portfolio.json only contributes presentation extras (thesis, links, pid).
     # New buys appear and sold positions disappear automatically — the snapshot can
@@ -80,17 +70,51 @@ if pp:
                                "finviz": "https://finviz.com/quote.ashx?t=" + tk}}
             h["shares"] = x.get("shares"); h["price"] = x.get("price")
             h["value"] = round(x.get("valueUsd") or x.get("value") or 0)
+            if x.get("dayRet") is not None: h["dayChange"] = x["dayRet"]   # Engine-Tageswert
+            if x.get("prevClose") is not None: h["prevClose"] = x["prevClose"]
             if x.get("unrealRet") is not None: h["unrealizedReturn"] = x["unrealRet"]
             if x.get("basisUsd"):
                 h["totalGainNet"] = round((x.get("valueUsd") or 0) - x["basisUsd"] + (x.get("realizedUsd") or 0))
             merged.append(h)
         cash_first = [h for h in rest if h.get("assetType") == "cash"]
-        options = [h for h in rest if h.get("assetType") != "cash"]
+        # options reconcile like securities: the engine (OCC-style tickers, e.g.
+        # ABVX270115C00120000) is the source of truth — new contracts appear, sold
+        # ones disappear (NVO-call-sold incident 2026-07-22)
+        MON = {1:"Jan",2:"Feb",3:"Mar",4:"Apr",5:"May",6:"Jun",7:"Jul",8:"Aug",9:"Sep",10:"Oct",11:"Nov",12:"Dec"}
+        DASH = "\u2014"
+        prev_opts = {h.get("occ") or h.get("ticker"): h for h in rest if h.get("assetType") != "cash"}
+        options = []
+        for x in pp["holdings"]:
+            m = re.match(r"^([A-Z.]{1,6})(\d{6})([CP])(\d{8})$", x.get("ticker") or "")
+            if not m or (x.get("shares") or 0) <= 0:
+                continue
+            und, ymd, cp = m.group(1), m.group(2), m.group(3)
+            strike = int(m.group(4)) / 1000
+            label = f"{MON[int(ymd[2:4])]}-20{ymd[0:2]} ${strike:g} {'Call' if cp == 'C' else 'Put'}"
+            h = prev_opts.get(m.group(0)) or prev_opts.get(und)
+            if h is None:   # brand-new contract: sensible defaults, thesis fills in later
+                h = {"pid": "pp_" + m.group(0), "ticker": und, "assetType": "option",
+                     "name": und + " " + DASH + " " + label, "thesis": "", "gquery": und,
+                     "links": {"stocktwits": "https://stocktwits.com/symbol/" + und,
+                               "x": "https://x.com/search?q=%24" + und + "&f=live",
+                               "finviz": "https://finviz.com/quote.ashx?t=" + und}}
+            else:           # keep the curated name prefix, refresh the contract label
+                h["name"] = (h.get("name") or und).split(" " + DASH + " ")[0] + " " + DASH + " " + label
+            h["occ"] = m.group(0)
+            h["shares"] = x.get("shares"); h["price"] = x.get("price")
+            h["value"] = round(x.get("valueUsd") or x.get("value") or 0)
+            if x.get("dayRet") is not None: h["dayChange"] = x["dayRet"]   # Engine-Tageswert
+            if x.get("prevClose") is not None: h["prevClose"] = x["prevClose"]
+            if x.get("avgCost"): h["costPrice"] = x["avgCost"]
+            if x.get("unrealRet") is not None: h["unrealizedReturn"] = x["unrealRet"]
+            if x.get("basisUsd"):
+                h["totalGainNet"] = round((x.get("valueUsd") or 0) - x["basisUsd"] + (x.get("realizedUsd") or 0))
+            options.append(h)
         port["holdings"] = cash_first + sorted(merged, key=lambda h: -h["value"]) + options
         # persist ticker-set changes back to portfolio.json — ir_sweep/social_sync read
         # their ticker lists from the FILE, so new buys must land there too (only on
         # set changes, to avoid a value-churn diff in every minute commit)
-        if set(by_tk) != {h["ticker"] for h in merged}:
+        if set(by_tk) != {h["ticker"] for h in merged} or set(prev_opts) != {h["occ"] for h in options}:
             try:
                 json.dump(port, open(os.path.join(ROOT, "portfolio.json"), "w"),
                           ensure_ascii=False, indent=1)
@@ -173,10 +197,30 @@ def displayed_isins():
     return isins or None
 
 _shown_isins = displayed_isins()
+# displayed brokers = the ports the CURRENT holdings sit in (IBKR/SQ); the private
+# depot has its own port name and is never among them
+_disp_ports = set()
+for _h in (pp.get("holdings", []) if pp else []):
+    _disp_ports.update((_h.get("byPort") or {}).keys())
+# the Parqet-derived shown-set is frozen in the pre-retirement past — extend it with
+# everything the displayed depot itself references, so post-Parqet buys stay visible
+if _shown_isins is not None and pp:
+    _shown_isins |= {h.get("isin") for h in pp.get("holdings", []) if h.get("isin")}
+    _shown_isins |= {t.get("isin") for t in pp.get("trades", [])
+                     if t.get("isin") and (not _disp_ports or t.get("port") in _disp_ports)}
 
 # Persist the privacy filter INTO pp.json itself, so the copy that lands in the public
 # repo's pipeline/ (and the cloud rebuild, which has no web egress to re-fetch) never
 # carries the separate depots' security names. Only when the fetch succeeded.
+if pp and _shown_isins is None and pp.get("securities"):
+    # Parqet-free fallback (account retired 2026-07-22): keep only securities the
+    # displayed portfolio itself references — holdings, closed trades, buy markers.
+    # Payments are excluded on purpose: the private dividend depot pays through there.
+    ref_isin = {h.get("isin") for h in pp.get("holdings", [])} | {t.get("isin") for t in pp.get("trades", [])}
+    ref_tk = ({h.get("ticker") for h in pp.get("holdings", [])} | {t.get("ticker") for t in pp.get("trades", [])}
+              | set((pp.get("buysByTicker") or {}).keys()))
+    _shown_isins = {s.get("isin") for s in pp["securities"]
+                    if s.get("isin") in ref_isin or s.get("ticker") in ref_tk}
 if pp and _shown_isins is not None and pp.get("securities"):
     kept = [s for s in pp["securities"] if s.get("isin") in _shown_isins]
     if kept and len(kept) < len(pp["securities"]):
@@ -276,11 +320,12 @@ def logo_candidates(h):
     return out
 
 # ---- PP per-holding numbers for the Holdings table (Rafael: "Daten unbedingt aus PP") ----
+_OCC_RE = re.compile(r"^[A-Z.]{1,6}\d{6}[CP]\d{8}$")
 def _pp_key(t):
-    return "NVO" if t.startswith("NVO") else t.split(".")[0]   # PINK.V -> PINK, NVO2701.. -> NVO
+    return t if _OCC_RE.match(t) else t.split(".")[0]   # PINK.V -> PINK; OCC tickers stay verbatim
 pp_by_ticker = {_pp_key(x["ticker"]): x for x in (pp.get("holdings", []) if pp else [])}
 for h in port["holdings"]:
-    px = pp_by_ticker.get(h["ticker"])
+    px = pp_by_ticker.get(h.get("occ") or h["ticker"])   # options match via their OCC ticker
     if px and h.get("assetType") != "cash":
         h["ppShares"] = px["shares"]
         h["ppAvgCost"] = px["avgCost"]          # native ccy (USD, PINK: CAD)
@@ -314,7 +359,12 @@ total = port["totalValue"]
 for h in port["holdings"]:
     h["alloc"] = round(100.0 * h["value"] / total, 1)
     h["logos"] = logo_candidates(h)
-    if h["assetType"] != "cash":
+    if h["assetType"] == "option":   # Kursquelle = Engine (Bid/Ask-Mitte): der Chart-Feed
+        h.pop("ySym", None)          # liefert nur den letzten Trade — beim illiquiden Kontrakt
+                                     # tagealt (zeigte 30.90 vom eigenen Kauf, 2026-07-26)
+        h["gquery"] = NEWS_QUERY.get(h["ticker"], (h.get("name") or h["ticker"]).split(" \u2014 ")[0])
+        h["liveCcy"] = LIVE_CCY.get(h["ticker"], "USD")
+    elif h["assetType"] != "cash":
         h["ySym"] = YAHOO_SYM.get(h["ticker"], h["ticker"])
         h["gquery"] = NEWS_QUERY.get(h["ticker"], h["name"])
         h["liveCcy"] = LIVE_CCY.get(h["ticker"], "USD")
@@ -323,7 +373,8 @@ for h in port["holdings"]:
     if m and m.get("price"):
         pc = m.get("prevClose") or m["price"]
         h["livePrice"] = m["price"]
-        h["dayChange"] = round((m["price"] - pc) / pc * 100, 2) if pc else 0
+        if h.get("dayChange") is None:   # Engine-Tageswert hat Vorrang (deckt sich mit der Today-Kachel)
+            h["dayChange"] = round((m["price"] - pc) / pc * 100, 2) if pc else 0
         h["hi52"] = m.get("hi52"); h["lo52"] = m.get("lo52")
         h["spark"] = m.get("spark", [])
         if h.get("hi52") and h.get("lo52") and h["hi52"] > h["lo52"]:
@@ -348,7 +399,9 @@ data = {
     "asOf": (pp["series"][-1]["d"] if pp and pp.get("series") else port["asOf"]),
     # UTC! Mac (EEST) vs runner (UTC) stamps broke the client's freshness compare
     # -> updates were rejected for hours after every local build+push
-    "generated": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
+    # stamp = DATA freshness (engine run time), NOT build-machine clock — a build from
+    # a lagging data copy must never outrank fresher on-device/Firestore state
+    "generated": (pp.get("generated") if pp else None) or datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
     "currency": port.get("currency", "EUR"),
     "portfolioId": port.get("portfolioId", "66e18c9426cf62020ccc7ee7"),
     "totalValue": total,
@@ -393,6 +446,27 @@ data = {
     # PP net-worth curve (daily EUR value + cum TTWROR) — replaces Parqet's wrong chart
     "chartPP": pp.get("series", []) if pp else [],
     "trades": pp_trades,
+    # Activities feed from the engine: trades + dividends/interest, shown ISINs only
+    # Activities feed = trades + every cash-relevant booking (PP's transaction list):
+    # dividends/interest received, interest charged, deposits, withdrawals. Interest
+    # is one PP kind with a sign - split it so a charge reads as a debit, not "+".
+    "acts": (lambda: (
+        sorted(
+          [a for a in (pp.get("acts", []) if pp else [])
+             if (a.get("port") in _disp_ports if (a.get("port") and _disp_ports)
+                 else (_shown_isins is None or a.get("isin") in _shown_isins or not a.get("isin")))]
+          + [{"d": p["d"], "t": p["k"].upper(), "tk": p["tk"], "amt": p["usd"], "ccy": "USD"}
+             for p in _pays if p["k"] == "dividend" and p.get("tk")
+             and (_shown_isins is None or any(s.get("ticker") == p["tk"] for s in pp.get("securities", [])))]
+          + [{"d": p["d"], "t": "INTEREST" if p["usd"] >= 0 else "INTEREST_CHARGE",
+              "tk": p.get("tk"), "amt": abs(p["usd"]), "ccy": "USD"}
+             for p in _pays if p["k"] == "interest" and abs(p.get("usd") or 0) >= 0.005]
+          + [{"d": p["d"], "t": p["k"].upper(), "tk": None, "amt": abs(p["usd"]), "ccy": "USD"}
+             for p in _pays if p["k"] in ("deposit", "withdrawal")],
+          key=lambda a: a["d"], reverse=True)
+    ))(),
+    # the individual purchases still held per ticker (open FIFO lots)
+    "lots": (pp.get("lotsByTicker", {}) if pp else {}),
     "tradeLogos": trade_logos,
     "payments": pay_journal,
     # security name map for Activities — ONLY ISINs shown in this portfolio (dividend
@@ -413,6 +487,11 @@ data = {
     "secCik": sec_cik,
     "social": (lambda: (json.load(open(os.path.join(ROOT, "social.json"), encoding="utf-8"))
                         if os.path.exists(os.path.join(ROOT, "social.json")) else {}))(),
+    # Code-Version der App (Hash von template.html): der Client vergleicht sie mit der
+    # Version im Live-Push und laedt sich EINMAL selbst neu, wenn er veraltet laeuft —
+    # iOS-Home-Screen-Apps behalten ihre Seite sonst tagelang (Vorfall 2026-07-29)
+    "appBuild": __import__("hashlib").md5(
+        open(os.path.join(ROOT, "template.html"), "rb").read()).hexdigest()[:10],
 }
 
 DATA_JSON = json.dumps(data, ensure_ascii=True)

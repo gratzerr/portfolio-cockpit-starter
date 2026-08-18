@@ -39,7 +39,12 @@ def req(method, url, body=None, tok=None):
 def pull():
     tok = access_token()
     j = req("GET", DOC, tok=tok)
-    if "fields" not in j:                       # first run: create the doc
+    if "fields" not in j:
+        # ONLY create on a definitive NOT_FOUND — a transient API error must NEVER
+        # recreate the doc with defaults (that reset Rafael's portfolio name on 2026-07-22)
+        err = (j.get("error") or {})
+        if err.get("status") != "NOT_FOUND" and err.get("code") != 404:
+            print("firestore pull: transient error, keeping local state:", str(j)[:150]); return
         body = {"fields":{
             "owner":{"stringValue":OWNER},
             "name":{"stringValue":_icfg.get("portfolioName", "Rafael's Portfolio")},
@@ -59,9 +64,33 @@ def pull():
     json.dump(state, open(os.path.join(ROOT,"site_state.json"),"w"))
     print(f"firestore pull: name={state['name']!r} public={state['public']}")
 
+# Firestore rejects any document over 1 MiB. The snapshot grew when the Activities
+# feed took in deposits/interest, so keep a valve: rather than letting the push fail
+# (which silently freezes the whole site), drop the activity history - the client
+# keeps the copy baked into the page whenever the live payload carries none.
+MAX_DOC = 1_000_000
+
 def push():
     tok = access_token()
     data = open(os.path.join(ROOT,"data.json"), encoding="utf-8").read()
+    if len(data.encode("utf-8")) > MAX_DOC:
+        try:
+            j = json.loads(data); j.pop("acts", None)
+            data = json.dumps(j, ensure_ascii=True)
+            print("firestore push: snapshot over 1 MiB — activity history left out of the live push")
+        except Exception as e:
+            print("firestore push: trim failed:", e)
+    # Firestore-Dokumente sind auf ~1 MiB begrenzt: die volle Trade-Historie (acts)
+    # sprengte das Limit und liess den Push tagelang scheitern (Vorfall 2026-07-24,
+    # eingefrorener Stand vom 21.07.). acts steckt in der gebackenen Seite — der
+    # Live-Push braucht sie nicht; der Client behaelt seine Liste beim Swap.
+    try:
+        j = json.loads(data)
+        j.pop("acts", None)
+        j.pop("social", None)   # 7-Tage-Archiv, steckt in der Seite — Push-Budget schonen
+        data = json.dumps(j, ensure_ascii=False, separators=(",", ":"))
+    except Exception:
+        pass
     body = {"fields":{
         "data":{"stringValue":data},
         "updated":{"stringValue":datetime.datetime.utcnow().isoformat()+"Z"}}}
